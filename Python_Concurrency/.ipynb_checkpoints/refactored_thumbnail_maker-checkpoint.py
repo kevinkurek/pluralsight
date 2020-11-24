@@ -17,13 +17,27 @@ class RefactoredThumbnailMakerService(object):
         self.home_dir = home_dir
         self.input_dir = self.home_dir + os.path.sep + 'incoming'
         self.output_dir = self.home_dir + os.path.sep + 'outgoing'
+        self.downloaded_bytes = 0
+        self.dl_lock = threading.Lock()
+        
+        # Example: image only allowed 4 concurrent downloads at once
+        max_concurrent_dl = 4
+        self.dl_sem = threading.Semaphore(max_concurrent_dl)
         
     def download_image(self, url):
         # download each image and save to the input dir
-        logging.info("downloading image at URL " + url)
-        img_filename = urlparse(url).path.split('/')[-1]
-        urlretrieve(url, self.input_dir + os.path.sep + img_filename)
-        logging.info("image saved to " + self.input_dir + os.path.sep + img_filename)
+        with self.dl_sem:
+            logging.info("downloading image at URL " + url)
+            img_filename = urlparse(url).path.split('/')[-1]
+            dest_path = self.input_dir + os.path.sep + img_filename
+            urlretrieve(url, dest_path)
+            img_size = os.path.getsize(dest_path)
+
+            # Confirming lock resources aren't overwritten by other threads
+            with self.dl_lock:
+                self.downloaded_bytes += img_size
+
+            logging.info("image [{} bytes] saved to {}".format(img_size, dest_path))
 
     def download_images(self, img_url_list):
         # validate inputs
@@ -36,12 +50,13 @@ class RefactoredThumbnailMakerService(object):
         start = time.perf_counter()
         threads = []
         for url in img_url_list:
+            # Associate a thread to the download_image() function
             t = threading.Thread(target=self.download_image, args=(url,))
-            t.start()
-            threads.append(t)
+            t.start() # Just open thread
+            threads.append(t) # Append threads to list
         
         for t in threads:
-            t.join()
+            t.join() # Actually calculate threads
             
         end = time.perf_counter()
 
